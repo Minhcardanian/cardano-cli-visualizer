@@ -1,170 +1,146 @@
-# User Requirements and Demo Layout
+# Cardano-CLI Transaction Visualizer
 
-This document outlines the user requirements and the demo layout for our Cardano‑CLI web‑based shell experience. It serves as a guide for both developers and presenters.
+A front-end-only React/Next.js application that streams Cardano-CLI commands as JSON events and renders a live transaction flow visualization.
 
----
+## Requirements
 
-## 1. User Requirements
+* Browser capable of SSE/WebSocket (modern Chrome/Firefox/Edge)
+* React/Next.js app (TypeScript preferred)
+* `event-source-polyfill` for older browser support
+* No backend required (optional mock events)
 
-* **Environment**:
+## Installation
 
-  * Node.js (v16+) or Python (v3.9+) runtime
-  * `cardano-cli` installed and configured (mainnet or testnet)
-  * Network access (localhost or public URL via ngrok/Vercel)
+```bash
+npx create-next-app cardano-viz --typescript
+cd cardano-viz
+npm install react-flow-renderer xterm mustache event-source-polyfill
+```
 
-* **CLI Workflow as Functions**:
-
-  * Treat each `cardano-cli` invocation as a named function (e.g. `createKeys(wallet)`, `getBalance(address)`, `lockFunds(wallet, amount)`)
-  * Use string‑templates with replaceable parameters for each command
-  * Support a `--simulate` (dry‑run) flag for previews without on‑chain submission
-
-* **Security & Validation**:
-
-  * Input validation to prevent command injection
-  * Sandbox execution (Docker/VM) to isolate demo environment
-  * Config file for network flags and script addresses
-
-* **Interactive Presentation Features**:
-
-  * Typewriter animation for commands
-  * Real‑time progress spinners with sub‑step labels (build, sign, submit)
-  * Before/after state diffs (UTXO balances, pie charts)
-  * Gamification elements (badges, success animations)
-  * Inline tooltips for flags and parameters
-
-* **Layout Options**:
-
-  * **Split‑Page** (Left/Right):
-
-    * **Left Pane**: Live terminal (xterm.js)
-    * **Right Pane**: Visualization panel (charts, UTXO tables)
-  * **Upper/Lower**:
-
-    * **Top Pane**: Live terminal (xterm.js)
-    * **Bottom Pane**: Visualization panel
-
-* **Controls**:
-
-  * Toolbar with playback controls: Prev | Next | Dry‑Run Toggle
-
----
-
-## 2. Demo Layout
-
-### 2.1. Pre‑requisites
-
-1. Clone repository and install dependencies:
-
-   ```bash
-   git clone https://github.com/your-org/cardano-web-shell.git
-   cd cardano-web-shell
-   npm install    # or pip install -r requirements.txt
-   ```
-2. Ensure `cardano-node` and `cardano-cli` are running and synced.
-3. (Optional) Start a tunnel:
-
-   ```bash
-   ngrok http 3000
-   ```
-
-### 2.2. File Structure
+## File Structure
 
 ```plaintext
-cardano-web-shell/
-├─ cli-templates.js     # Command templates
-├─ server.js            # WebSocket & PTY backend
-├─ public/
-│  └─ index.html        # Entry point
-├─ src/
-│  ├─ App.jsx           # Main React component
-│  ├─ Terminal.jsx      # XTerm wrapper
-│  └─ Visualization.jsx # Charts & tables
-└─ config.json          # Network & script parameters
+src/
+├─ App.tsx                    # Root component: ties CommandInput + Visualization
+├─ components/
+│  ├─ CommandInput.tsx        # Textarea + Run & Visualize button
+│  ├─ Visualization.tsx       # React Flow / D3 Sankey renderer
+│  └─ useSSE.ts               # SSE hookup or mock event generator
+└─ mocks/
+   └─ mockEvents.ts           # Fake CliEvent generator
 ```
 
-### 2.3. UI Components
+## Architecture
 
-| Component           | Description                                        |
-| ------------------- | -------------------------------------------------- |
-| **Terminal Pane**   | Live shell powered by xterm.js + node-pty          |
-| **Viz Pane**        | Chart.js or D3.js for UTXO tables & balance graphs |
-| **Toolbar**         | Step controls, dry‑run toggle, presentation‑mode   |
-| **Parameter Panel** | Inline inputs/sliders to tweak function arguments  |
-
-### 2.4. Upper/Lower Split View
-
-```markdown
-┌──────────────────────────────────────────────┐
-│ Terminal (xterm.js)                         │
-│ ┌───┐ ─▶ lockFunds("DemoWallet", 1_000_000) │
-│ │ ▶ │ Execute Next Step                     │
-│ └───┘                                      │
-├──────────────────────────────────────────────┤
-│ Visualization (Chord/UTXO)                  │
-│ ┌──────────────┐                             │
-│ │ Pie Chart    │                             │
-│ └──────────────┘                             │
-└──────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+  A["User Browser (UI)"] -->|Runs command| B["useSSE/EventSource"]
+  B -->|Streams events| C["Visualization Engine"]
+  C -->|Renders visuals| A
+  B -->|Fallback| D["mockEvents in mocks/mockEvents.ts"]
 ```
 
-### 2.5. Split‑Page View
+mermaid
+flowchart LR
+A\[User Browser (UI)] -->|Runs command| B\[useSSE / EventSource]
+B -->|Streams JSON events| C\[Visualization Engine]
+C -->|Renders visuals| A
+B -->|Fallback to mock| D\[mockEvents (mocks/mockEvents.ts)]
 
-```markdown
-┌────────────────────────────────┬───────────────────────────────┐
-│ Terminal (xterm.js)           │ Visualization (Chord/UTXO)    │
-│ ┌───┐ ─▶ lockFunds("Demo",1)   │ ┌──────────────┐               │
-│ │ ▶ │ Execute Next Step        │ │ Pie Chart    │               │
-│ └───┘                         │ └──────────────┘               │
-└────────────────────────────────┴───────────────────────────────┘
+````
+
+## Covered CLI Commands
+
+### Key & Address Generation
+
+```bash
+cardano-cli address key-gen --verification-key-file payment.vkey --signing-key-file payment.skey
+cardano-cli address build --payment-verification-key-file payment.vkey --out-file payment.addr --testnet-magic 1097911063
+````
+
+### UTxO Query
+
+```bash
+cardano-cli query utxo --address $(cat payment.addr) --testnet-magic 1097911063
 ```
 
-### 2.6. Demo Script Steps
+### Build/Sign/Submit (Simple Transaction)
 
-1. **Generate Keys**
+```bash
+cardano-cli transaction build-raw --tx-in TXIN#0 --tx-out RECIPIENT_ADDR+1000000 --fee 170000 --out-file tx.raw
+cardano-cli transaction sign --signing-key-file payment.skey --tx-body-file tx.raw --out-file tx.signed --testnet-magic 1097911063
+cardano-cli transaction submit --tx-file tx.signed --testnet-magic 1097911063
+```
+
+### Scripted Transaction (AlwaysSucceed)
+
+```bash
+cardano-cli transaction build --alonzo-era --tx-in-script-file alwaysSucceed.plutus --tx-in-script-redeemer-file redeemer.json --tx-in TXIN#0 --tx-out $(cat payment.addr)+1000000 --change-address $(cat payment.addr) --testnet-magic 1097911063
+```
+
+## Layout Diagrams
+
+```mermaid
+flowchart TB
+  subgraph Terminal["Command Input"]
+    A["> cardano-cli transaction build …"]
+  end
+  subgraph Viz["Transaction Flow"]
+    B["Sankey Diagram"]
+  end
+```
+
+```mermaid
+flowchart LR
+  subgraph Terminal["Command Input"]
+    A["> cardano-cli query utxo …"]
+  end
+  subgraph Viz["UTxO Table"]
+    B["Table of UTxOs before/after"]
+  end
+```
+
+## Demo Script Steps
+
+1. **Generate Keys & Address**
 
    ```bash
-   createKeys("DemoWallet")
+   cardano-cli address key-gen …  
+   cardano-cli address build …
    ```
-2. **Build Address**
+2. **Query UTxO Before**
 
    ```bash
-   buildAddress("DemoWallet")
+   cardano-cli query utxo --address $(cat payment.addr) …
    ```
-3. **Get Balance**
+3. **Build/Sign/Submit**
 
    ```bash
-   getBalance("addr_test1…")
+   cardano-cli transaction build-raw …  
+   cardano-cli transaction sign …  
+   cardano-cli transaction submit …
    ```
-4. **Lock Funds**
+4. **Visual Confirmation**
+   Sankey or pie chart shows input UTxO consumed and new UTxO created
+5. **Scripted Lock Funds**
 
    ```bash
-   lockFunds("DemoWallet", 1_000_000)
+   cardano-cli transaction build … --tx-in-script-file alwaysSucceed.plutus …
    ```
-5. **Visual Confirmation**
-
-   * Pie chart updates to reflect locked funds
 6. **Unlock Funds**
 
    ```bash
-   unlockFunds("DemoWallet", "<txIn>", "{}")
+   cardano-cli transaction build … --tx-in-script-redeemer-file redeemer.json …
    ```
-7. **State Diff**
+7. **Query UTxO After & Balance Diff**
+
+   ```bash
+   cardano-cli query utxo --address $(cat payment.addr) …
+   ```
 
    ```diff
    - Wallet: 5 ADA
    + Wallet: 4 ADA
    ```
 
-### 2.7. Presentation Mode
-
-* **Single‑pane Terminal**: Full‑screen with typewriter effect
-* **Speaker Controls**: Hotkeys to toggle tooltips, pause playback, switch to recorded fallback
-
-### 2.8. Fallback Strategy
-
-* If live demo fails, play back a pre‑recorded `ttyrec` session
-* Static sequence of commands & outputs with preserved timing
-
----
-
-> *This layout ensures a seamless, interactive demo that clearly ties each `cardano-cli` function call to its visual outcome, keeping the audience engaged and informed.*
+*End of README.md*

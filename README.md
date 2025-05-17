@@ -1,146 +1,42 @@
-# Cardano-CLI Transaction Visualizer
+# App Overview & Functionality
 
-A front-end-only React/Next.js application that streams Cardano-CLI commands as JSON events and renders a live transaction flow visualization.
+**Cardano-CLI Transaction Visualizer** is a pure-web (Next.js + React) application that lets non-technical users:
 
-## Requirements
+1. **Manage Keys Offline**  
+   - Generate or import a wallet mnemonic in the browser  
+   - Encrypt the private key with a passphrase and store it in IndexedDB  
+   - Unlock it on demand, build & sign transactions entirely offline with Lucid
 
-* Browser capable of SSE/WebSocket (modern Chrome/Firefox/Edge)
-* React/Next.js app (TypeScript preferred)
-* `event-source-polyfill` for older browser support
-* No backend required (optional mock events)
+2. **Build & Sign Transactions**  
+   - Query UTxOs (via Blockfrost or local API) and cache them  
+   - Provide a simple “Send ADA” form—no raw flags  
+   - Under the hood, Lucid builds the transaction, signs it with the user’s key, and exports a CBOR hex blob
 
-## Installation
+3. **Event Logging & Audit Trail**  
+   - Every key action (`key:created`, `key:unlocked`, `tx:signed`, `key:wiped`, `tx:submitted`) is recorded  
+   - Logs are stored in a secure, append-only IndexedDB store for user review
 
-```bash
-npx create-next-app cardano-viz --typescript
-cd cardano-viz
-npm install react-flow-renderer xterm mustache event-source-polyfill
-```
+4. **Offline-First UX**  
+   - Users can download the signed CBOR and submit later (air-gapped if desired)  
+   - When ready, they “Upload CBOR” to a Next.js API route  
+   - The server (via **cardanocli-js**) submits it to a local `cardano-node` and returns the TxHash
 
-## File Structure
+---
 
-```plaintext
-src/
-├─ App.tsx                    # Root component: ties CommandInput + Visualization
-├─ components/
-│  ├─ CommandInput.tsx        # Textarea + Run & Visualize button
-│  ├─ Visualization.tsx       # React Flow / D3 Sankey renderer
-│  └─ useSSE.ts               # SSE hookup or mock event generator
-└─ mocks/
-   └─ mockEvents.ts           # Fake CliEvent generator
-```
+# Storage Usage Estimation
 
-## Architecture
+| Store           | Content                                                    | Typical Size per Item | Example Count | Total Size  |
+|-----------------|------------------------------------------------------------|-----------------------:|--------------:|-----------:|
+| **KeyStore**    | AES-GCM encrypted private key + metadata                   | ~2 KB                  | 1             | ~2 KB       |
+| **Key Logs**    | `{ ts, action, details, success }` entries                 | ~0.2 KB (200 B)        | 100           | ~20 KB      |
+| **UTxO Cache**  | Cached UTxO objects (`txHash`, `index`, `lovelace`, datum) | ~0.5 KB (500 B)        | 100           | ~50 KB      |
 
-```mermaid
-flowchart LR
-  A["User Browser (UI)"] -->|Runs command| B["useSSE/EventSource"]
-  B -->|Streams events| C["Visualization Engine"]
-  C -->|Renders visuals| A
-  B -->|Fallback| D["mockEvents in mocks/mockEvents.ts"]
-```
+**Estimated total** (1 wallet + 100 log entries + 100 UTxOs): **≈ 72 KB**
 
-mermaid
-flowchart LR
-A\[User Browser (UI)] -->|Runs command| B\[useSSE / EventSource]
-B -->|Streams JSON events| C\[Visualization Engine]
-C -->|Renders visuals| A
-B -->|Fallback to mock| D\[mockEvents (mocks/mockEvents.ts)]
+> **Notes & Scaling**  
+> - **KeyStore** size is fixed per wallet (typically 1–3 KB).  
+> - **Logs** grow linearly—200 bytes each; you can purge or archive old entries.  
+> - **UTxO cache** depends on how many addresses you query; you might only keep the “active” ones (e.g. 20–50 UTxOs).  
+> - Even with 1,000 UTxOs and 1,000 logs, you’re under 1 MB—well within modern browsers’ IndexedDB quotas.
 
-````
-
-## Covered CLI Commands
-
-### Key & Address Generation
-
-```bash
-cardano-cli address key-gen --verification-key-file payment.vkey --signing-key-file payment.skey
-cardano-cli address build --payment-verification-key-file payment.vkey --out-file payment.addr --testnet-magic 1097911063
-````
-
-### UTxO Query
-
-```bash
-cardano-cli query utxo --address $(cat payment.addr) --testnet-magic 1097911063
-```
-
-### Build/Sign/Submit (Simple Transaction)
-
-```bash
-cardano-cli transaction build-raw --tx-in TXIN#0 --tx-out RECIPIENT_ADDR+1000000 --fee 170000 --out-file tx.raw
-cardano-cli transaction sign --signing-key-file payment.skey --tx-body-file tx.raw --out-file tx.signed --testnet-magic 1097911063
-cardano-cli transaction submit --tx-file tx.signed --testnet-magic 1097911063
-```
-
-### Scripted Transaction (AlwaysSucceed)
-
-```bash
-cardano-cli transaction build --alonzo-era --tx-in-script-file alwaysSucceed.plutus --tx-in-script-redeemer-file redeemer.json --tx-in TXIN#0 --tx-out $(cat payment.addr)+1000000 --change-address $(cat payment.addr) --testnet-magic 1097911063
-```
-
-## Layout Diagrams
-
-```mermaid
-flowchart TB
-  subgraph Terminal["Command Input"]
-    A["> cardano-cli transaction build …"]
-  end
-  subgraph Viz["Transaction Flow"]
-    B["Sankey Diagram"]
-  end
-```
-
-```mermaid
-flowchart LR
-  subgraph Terminal["Command Input"]
-    A["> cardano-cli query utxo …"]
-  end
-  subgraph Viz["UTxO Table"]
-    B["Table of UTxOs before/after"]
-  end
-```
-
-## Demo Script Steps
-
-1. **Generate Keys & Address**
-
-   ```bash
-   cardano-cli address key-gen …  
-   cardano-cli address build …
-   ```
-2. **Query UTxO Before**
-
-   ```bash
-   cardano-cli query utxo --address $(cat payment.addr) …
-   ```
-3. **Build/Sign/Submit**
-
-   ```bash
-   cardano-cli transaction build-raw …  
-   cardano-cli transaction sign …  
-   cardano-cli transaction submit …
-   ```
-4. **Visual Confirmation**
-   Sankey or pie chart shows input UTxO consumed and new UTxO created
-5. **Scripted Lock Funds**
-
-   ```bash
-   cardano-cli transaction build … --tx-in-script-file alwaysSucceed.plutus …
-   ```
-6. **Unlock Funds**
-
-   ```bash
-   cardano-cli transaction build … --tx-in-script-redeemer-file redeemer.json …
-   ```
-7. **Query UTxO After & Balance Diff**
-
-   ```bash
-   cardano-cli query utxo --address $(cat payment.addr) …
-   ```
-
-   ```diff
-   - Wallet: 5 ADA
-   + Wallet: 4 ADA
-   ```
-
-*End of README.md*
+This footprint is lightweight, ensures responsive UI, and keeps all user data completely under their control.

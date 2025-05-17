@@ -38,5 +38,46 @@
 > - **Logs** grow linearly—200 bytes each; you can purge or archive old entries.  
 > - **UTxO cache** depends on how many addresses you query; you might only keep the “active” ones (e.g. 20–50 UTxOs).  
 > - Even with 1,000 UTxOs and 1,000 logs, you’re under 1 MB—well within modern browsers’ IndexedDB quotas.
+--- 
+## Master architecture
+```mermaid
+flowchart TD
+  subgraph OfflineSigning["Offline Signing (Browser)"]
+    UI["User UI"]
+    Unlock["Unlock Key\n(passphrase)"]
+    KS["KeyStore\n(in-memory)"]
+    LB["Lucid TX Builder"]
+    SG["Lucid TX Signer"]
+    Export["Export CBOR\n(File/QR)"]
+    Clear["Clear Keys\nfrom Memory"]
+    Log["Event Logger"]
+  end
+  subgraph DBStores["IndexedDB Stores"]
+    KSDB["KeyStore"]
+    KLDB["Key Logs"]
+    UTXODB["UTxO Cache"]
+  end
+
+  UI --> Unlock --> KS --> LB --> SG
+  SG --> Export
+  SG --> Clear
+  SG --> Log
+
+  KSDB -. "load/store" .-> KS
+  KLDB -. "append log" .-> Log
+  UTXODB -. "cache utxos" .-> UI
+
+  Export --> API["Next.js API\n/api/submit"]
+
+  subgraph OnlineSubmission["Online Submission (Server)"]
+    CLIJS["cardanocli-js"]
+    CLI["cardano-cli submit"]
+    NODE["cardano-node"]
+  end
+
+  API --> CLIJS --> CLI --> NODE --> CLIJS --> API
+  API --> UI
+ 
+```
 
 This footprint is lightweight, ensures responsive UI, and keeps all user data completely under their control.
